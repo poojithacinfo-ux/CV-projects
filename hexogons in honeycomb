@@ -1,0 +1,132 @@
+"""
+detect_hexagons.py
+Detect hexagonal cells in a honeycomb image using OpenCV contours & polygon approximation.
+Outputs an image with detected hexagons outlined and bounding boxes saved as `output.png`.
+"""
+
+import cv2
+import numpy as np
+
+# ---------- PARAMETERS YOU CAN TUNE ----------
+INPUT_IMAGE = "honeycomb.jpg"
+OUTPUT_IMAGE = "output.png"
+
+# Preprocessing
+GAUSSIAN_BLUR_KERNEL = (5, 5)
+ADAPTIVE_THRESH_BLOCK = 51  # must be odd
+ADAPTIVE_THRESH_C = 9
+
+# Contour filtering
+MIN_AREA = 200      # ignore tiny contours (depends on image scale)
+MAX_AREA = 200000   # ignore extremely large contours
+APPROX_EPSILON_FACTOR = 0.02  # polygon approx epsilon = factor * perimeter
+
+# Hexagon test
+VERTEX_COUNT = 6
+MAX_ANGLE_DEVIATION = 20  # degrees from 120° internal angle (approx)
+# --------------------------------------------
+
+def angle_between_points(a, b, c):
+    """Return the angle at point b formed by points a-b-c (in degrees)."""
+    ba = a - b
+    bc = c - b
+    cos_angle = (ba @ bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-9)
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
+    angle_rad = np.arccos(cos_angle)
+    return np.degrees(angle_rad)
+
+def is_hexagon(approx):
+    """Check whether approximated polygon is a hexagon by vertex count and angle checks."""
+    if len(approx) != VERTEX_COUNT:
+        return False
+    pts = np.array([p[0] for p in approx], dtype=np.float32)
+    angles = []
+    n = len(pts)
+    for i in range(n):
+        a = pts[(i - 1) % n]
+        b = pts[i]
+        c = pts[(i + 1) % n]
+        ang = angle_between_points(a, b, c)
+        angles.append(ang)
+    # ideal interior angle for regular hexagon is 120 degrees
+    dev = np.abs(np.array(angles) - 120.0)
+    # ensure angles are reasonably close
+    if np.max(dev) > MAX_ANGLE_DEVIATION:
+        return False
+    return True
+
+def main():
+    img = cv2.imread(INPUT_IMAGE)
+    if img is None:
+        print(f"Error: cannot load {INPUT_IMAGE}. Place the image in the script folder or set correct path.")
+        return
+    orig = img.copy()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, GAUSSIAN_BLUR_KERNEL, 0)
+
+    # Adaptive threshold for variable lighting (good for honeycomb photos)
+    th = cv2.adaptiveThreshold(blur, 255,
+                                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                cv2.THRESH_BINARY_INV,
+                                ADAPTIVE_THRESH_BLOCK,
+                                ADAPTIVE_THRESH_C)
+
+    # Optional morphological ops to remove noise / close gaps
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    # Find contours
+    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    hexagons = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < MIN_AREA or area > MAX_AREA:
+            continue
+        perimeter = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, APPROX_EPSILON_FACTOR * perimeter, True)
+
+        if not cv2.isContourConvex(approx):
+            # optional: require convexity for hexagon shape
+            continue
+
+        if is_hexagon(approx):
+            # compute bounding box & centroid
+            x,y,w,h = cv2.boundingRect(approx)
+            M = cv2.moments(approx)
+            if M["m00"] != 0:
+                cx = int(M["m10"]/M["m00"])
+                cy = int(M["m01"]/M["m00"])
+            else:
+                cx,cy = x + w//2, y + h//2
+            hexagons.append({
+                "approx": approx,
+                "area": area,
+                "bbox": (x,y,w,h),
+                "centroid": (cx,cy)
+            })
+
+    # Sort by area (optional)
+    hexagons = sorted(hexagons, key=lambda h: -h["area"])
+
+    # Draw results
+    for i, h in enumerate(hexagons):
+        approx = h["approx"]
+        x,y,w,hbox = h["bbox"]
+        cx,cy = h["centroid"]
+        cv2.drawContours(orig, [approx], -1, (0,255,0), 2)   # outline
+        cv2.rectangle(orig, (x,y), (x+w, y+hbox), (255,0,0), 1)  # bounding box
+        cv2.circle(orig, (cx,cy), 3, (0,0,255), -1)          # centroid
+        cv2.putText(orig, f"{i+1}", (x, y-6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0), 1)
+
+    cv2.imwrite(OUTPUT_IMAGE, orig)
+    print(f"Detected {len(hexagons)} hexagon(s). Result saved to {OUTPUT_IMAGE}.")
+
+    # Show windows (press any key to close)
+    cv2.imshow("threshold", th)
+    cv2.imshow("detections", orig)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
