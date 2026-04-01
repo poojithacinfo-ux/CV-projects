@@ -1,0 +1,49 @@
+import cv2
+import numpy as np
+
+# Load the image
+image = cv2.imread("city1.webp")
+if image is None:
+    print("❌ Image not found! Add 'city.jpg' to the project folder.")
+    exit()
+
+# Convert to HSV color space
+hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+# Define red color range in HSV
+# Red color spans two regions in HSV
+lower_red1 = np.array([0, 120, 70])
+upper_red1 = np.array([10, 255, 255])
+lower_red2 = np.array([170, 120, 70])
+upper_red2 = np.array([180, 255, 255])
+
+# Mask for both red regions
+mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+mask = mask1 + mask2
+
+# Clean up noise
+kernel = np.ones((3, 3), np.uint8)
+mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+mask = cv2.dilate(mask, kernel, iterations=1)
+
+# Find contours of red areas
+contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+# Draw bounding boxes around detected red signs
+output = image.copy()
+for (i, contour) in enumerate(contours):
+    area = cv2.contourArea(contour)
+    if area > 500:  # filter small regions
+        x, y, w, h = cv2.boundingRect(contour)
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        cv2.putText(output, f"Red Sign {i+1}", (x, y-10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+# Show results
+cv2.imshow("Original Image", image)
+cv2.imshow("Red Regions Mask", mask)
+cv2.imshow("Detected Red Signs", output)
+
+cv2.waitKey(0)
+cv2.destroyAllWindows()
