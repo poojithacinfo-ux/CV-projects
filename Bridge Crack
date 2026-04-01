@@ -1,0 +1,35 @@
+import cv2
+import numpy as np
+
+# Load the image
+image = cv2.imread('bridge_crack.jpg')
+if image is None:
+    print("❌ Image not found. Place 'bridge_crack.jpg' in the project folder.")
+    exit()
+
+# Convert to grayscale
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+# Remove noise
+blur = cv2.GaussianBlur(gray, (5, 5), 0)
+
+# Edge detection
+edges = cv2.Canny(blur, 50, 150)
+
+# Strengthen edges (cracks)
+kernel = np.ones((3, 3), np.uint8)
+dilated = cv2.dilate(edges, kernel, iterations=1)
+
+# Find contours (crack outlines)
+contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+# Draw contours on original image
+output = image.copy()
+cv2.drawContours(output, contours, -1, (0, 0, 255), 1)
+
+# Display results
+cv2.imshow("Original Image", image)
+cv2.imshow("Cracks Detected", output)
+
+cv2.waitKey(0)
+cv2.destroyAllWindows()
